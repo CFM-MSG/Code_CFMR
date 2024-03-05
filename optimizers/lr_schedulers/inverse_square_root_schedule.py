@@ -37,7 +37,6 @@ class InverseSquareRootSchedule(FairseqLRScheduler):
         #         ' Consider --lr-scheduler=fixed instead.'
         #     )
         warmup_end_lr = optimizer.lr
-        print('warmup_end_lr', warmup_end_lr)
         if args['warmup_init_lr'] < 0:
             warmup_init_lr = warmup_end_lr
         self.warmup_init_lr = args['warmup_init_lr']

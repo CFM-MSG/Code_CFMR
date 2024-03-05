@@ -1,15 +1,14 @@
 import random
 from tkinter.messagebox import NO
 import numpy as np
-# import torch
-# from torch.utils.data import Dataset
-import mindspore as ms
+import torch
+from torch.utils.data import Dataset
 import pdb
 
 from utils import load_json
 import nltk
 
-class BaseDataset():
+class BaseDataset(Dataset):
     def __init__(self, data_path, vocab, args, **kwargs):
         self.vocab = vocab
         self.args = args
@@ -110,16 +109,11 @@ def build_collate_data(max_num_frames, max_num_words, frame_dim, word_dim):
         for i, sample in enumerate(samples):
             frames_len.append(min(len(sample['frames_feat']), max_num_frames))
             words_len.append(min(len(sample['words_id']), max_num_words))
-            # frames_len.append(max_num_frames)
-            # words_len.append(max_num_words)
 
         frames_feat = np.zeros([bsz, max_num_frames, frame_dim]).astype(np.float32)
-        # words_feat = np.zeros([bsz, max(words_len) + 2, word_dim]).astype(np.float32)
-        # words_id = np.zeros([bsz, max(words_len)]).astype(np.int64)
-        # weights = np.zeros([bsz, max(words_len)]).astype(np.float32)
-        words_feat = np.zeros([bsz, max_num_words + 2, word_dim]).astype(np.float32)
-        words_id = np.zeros([bsz, max_num_words]).astype(np.int64)
-        weights = np.zeros([bsz, max_num_words]).astype(np.float32)
+        words_feat = np.zeros([bsz, max(words_len) + 2, word_dim]).astype(np.float32)
+        words_id = np.zeros([bsz, max(words_len)]).astype(np.int64)
+        weights = np.zeros([bsz, max(words_len)]).astype(np.float32)
         glance = np.zeros([bsz]).astype(np.float32)
 
             
@@ -137,13 +131,13 @@ def build_collate_data(max_num_frames, max_num_words, frame_dim, word_dim):
         
         batch.update({
                 'net_input': {
-                    'frames_feat': ms.Tensor(frames_feat),
-                    'frames_len': ms.Tensor(np.asarray(frames_len)),
-                    'words_feat': ms.Tensor(words_feat),
-                    'words_id': ms.Tensor(words_id),
-                    'weights': ms.Tensor(weights),
-                    'words_len': ms.Tensor(np.asarray(words_len)),
-                    'glance': ms.Tensor(glance),
+                    'frames_feat': torch.from_numpy(frames_feat),
+                    'frames_len': torch.from_numpy(np.asarray(frames_len)),
+                    'words_feat': torch.from_numpy(words_feat),
+                    'words_id': torch.from_numpy(words_id),
+                    'weights': torch.from_numpy(weights),
+                    'words_len': torch.from_numpy(np.asarray(words_len)),
+                    'glance': torch.from_numpy(glance),
                 }
             })
         return batch

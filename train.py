@@ -24,14 +24,17 @@ def main(kargs):
     import logging
     import numpy as np
     import random
-    # import torch
-    import mindspore as ms
+    import torch
     from runners import MainRunner
 
     seed = kargs.seed
     random.seed(seed)
     np.random.seed(seed + 1)
-    ms.set_seed(seed + 2)
+    torch.manual_seed(seed + 2)
+    torch.cuda.manual_seed(seed + 4)
+    torch.cuda.manual_seed_all(seed + 4)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     if kargs.log_dir:
         Path(kargs.log_dir).mkdir(parents=True, exist_ok=True)

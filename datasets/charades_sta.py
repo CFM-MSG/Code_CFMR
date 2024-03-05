@@ -1,13 +1,8 @@
 import h5py
 import numpy as np
-import pickle
-import mindspore.dataset as ds
-import sys
-import os
 
-# print(sys.path)
 from datasets.base import BaseDataset, build_collate_data
-# # from base import BaseDataset, build_collate_data
+
 
 class CharadesSTA(BaseDataset):
     def __init__(self, data_path, vocab, args, **kwargs):
@@ -19,9 +14,5 @@ class CharadesSTA(BaseDataset):
         with h5py.File(self.args['feature_path'], 'r') as fr:
             return np.asarray(fr[vid]).astype(np.float32)
 
-    def collate_data(self, samples, BatchInfo):
-        # print(samples)
-        # print(BatchInfo)
+    def collate_data(self, samples):
         return self.collate_fn(samples)
-
-    

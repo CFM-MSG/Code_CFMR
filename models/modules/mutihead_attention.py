@@ -1,10 +1,8 @@
-import mindspore
-import mindspore.nn as nn
-import mindspore.ops as ops
-import mindspore.ops.operations as P
-from mindspore import Parameter, Tensor
-from mindspore.common.initializer import initializer, XavierUniform, XavierNormal, Constant
-from fairseq import utils
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn import Parameter
+
 import pdb
 
 
@@ -13,7 +11,7 @@ from typing import Optional
 
 import numpy as np
 
-class MultiheadAttention(nn.Cell):
+class MultiheadAttention(nn.Module):
     """Multi-headed attention.
 
     See "Attention Is All You Need" for more details.
@@ -24,38 +22,32 @@ class MultiheadAttention(nn.Cell):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
-        # self.dropout = 1 - dropout
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
         self.scaling = self.head_dim ** -0.5
 
-        # self.in_proj_weight = Parameter(torch.Tensor(3 * embed_dim, embed_dim))
-        self.in_proj_weight = Parameter(initializer(XavierUniform(), [3 * embed_dim, embed_dim], mindspore.float32))
+        self.in_proj_weight = Parameter(torch.Tensor(3 * embed_dim, embed_dim))
         if bias:
-            self.in_proj_bias = Parameter(initializer(Constant(0.), [3 * embed_dim], mindspore.float32))
-            # self.in_proj_bias = Parameter(torch.Tensor(3 * embed_dim))
+            self.in_proj_bias = Parameter(torch.Tensor(3 * embed_dim))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = nn.Dense(in_channels=embed_dim, out_channels=embed_dim, has_bias=bias,weight_init=XavierNormal(), bias_init=Constant(0.))
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
 
         if add_bias_kv:
-            self.bias_k = Parameter(initializer(XavierNormal(), [1, 1, embed_dim], mindspore.float32))
-            self.bias_v = Parameter(initializer(XavierNormal(), [1, 1, embed_dim], mindspore.float32))
-            # self.bias_k = Parameter(torch.Tensor(1, 1, embed_dim))
-            # self.bias_v = Parameter(torch.Tensor(1, 1, embed_dim))
+            self.bias_k = Parameter(torch.Tensor(1, 1, embed_dim))
+            self.bias_v = Parameter(torch.Tensor(1, 1, embed_dim))
         else:
             self.bias_k = self.bias_v = None
 
         self.add_zero_attn = add_zero_attn
 
-        # self.reset_parameters()
+        self.reset_parameters()
 
         self.onnx_trace = False
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
 
-    # unused, init in Parameter
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.in_proj_weight)
         nn.init.xavier_uniform_(self.out_proj.weight)
@@ -67,7 +59,7 @@ class MultiheadAttention(nn.Cell):
         if self.bias_v is not None:
             nn.init.xavier_normal_(self.bias_v)
 
-    def construct(self, query, key, value, key_padding_mask=None, incremental_state=None,
+    def forward(self, query, key, value, key_padding_mask=None, incremental_state=None,
                 need_weights=True, static_kv=False, attn_mask=None, fast_weights=None,
                 gauss_weight=None):
         """Input shape: Time x Batch x Channel
@@ -79,16 +71,13 @@ class MultiheadAttention(nn.Cell):
         batch x src_len, where padding elements are indicated by 1s.
         """
 
-        # qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
-        # kv_same = key.data_ptr() == value.data_ptr()
-        qkv_same = id(query) == id(key) == id(value)
-        kv_same = id(key) == id(value)
+        qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
+        kv_same = key.data_ptr() == value.data_ptr()
 
-        tgt_len, bsz, embed_dim = query.shape
+        tgt_len, bsz, embed_dim = query.size()
         assert embed_dim == self.embed_dim
-        assert list(P.Shape()(query)) == [tgt_len, bsz, embed_dim]
-        
-        assert P.Shape()(key) == P.Shape()(value)
+        assert list(query.size()) == [tgt_len, bsz, embed_dim]
+        assert key.size() == value.size()
 
         if incremental_state is not None:
             saved_state = self._get_input_buffer(incremental_state)
@@ -120,21 +109,19 @@ class MultiheadAttention(nn.Cell):
         
         if self.bias_k is not None:
             assert self.bias_v is not None
-            k = P.Concat()([k, self.bias_k.repeat(bsz, axis=1)])
-            v = P.Concat()([v, self.bias_v.repeat(bsz, axis=1)])
+            k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
+            v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
             if attn_mask is not None:
-                attn_mask = P.Concat(1)([attn_mask, attn_mask.new_zeros((P.Shape()(attn_mask)[0], 1))])
+                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
             if key_padding_mask is not None:
-                key_padding_mask = P.Concat(1)([key_padding_mask, key_padding_mask.new_zeros((P.Shape()(key_padding_mask)[0], 1))])
+                key_padding_mask = torch.cat(
+                    [key_padding_mask, key_padding_mask.new_zeros(key_padding_mask.size(0), 1)], dim=1)
 
-        # q = P.Reshape()(q.contiguous(), (tgt_len, bsz * self.num_heads, self.head_dim,)).transpose(0, 1)
-        q = q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(1, 0, 2)
+        q = q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
         if k is not None:
-            # k = P.Reshape()(k.contiguous(), (-1, bsz * self.num_heads, self.head_dim,)).transpose(0, 1)
-            k = k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(1, 0, 2)
+            k = k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
         if v is not None:
-            # v = P.Reshape()(v.contiguous(), (-1, bsz * self.num_heads, self.head_dim,)).transpose(0, 1)
-            v = v.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(1, 0, 2)
+            v = v.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
 
         if saved_state is not None:
             # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
@@ -143,53 +130,55 @@ class MultiheadAttention(nn.Cell):
                 if static_kv:
                     k = prev_key
                 else:
-                    k = P.Concat(1)((prev_key, k))
+                    k = torch.cat((prev_key, k), dim=1)
             if 'prev_value' in saved_state:
                 prev_value = saved_state['prev_value'].view(bsz * self.num_heads, -1, self.head_dim)
                 if static_kv:
                     v = prev_value
                 else:
-                    v = P.Concat(1)((prev_value, v))
+                    v = torch.cat((prev_value, v), dim=1)
             saved_state['prev_key'] = k.view(bsz, self.num_heads, -1, self.head_dim)
             saved_state['prev_value'] = v.view(bsz, self.num_heads, -1, self.head_dim)
 
             self._set_input_buffer(incremental_state, saved_state)
 
-        src_len = k.shape[1]
+        src_len = k.size(1)
 
         # This is part of a workaround to get around fork/join parallelism
         # not supporting Optional types.
-        if key_padding_mask is not None and key_padding_mask.shape == mindspore.Tensor(1).shape:
+        if key_padding_mask is not None and key_padding_mask.shape == torch.Size([]):
             key_padding_mask = None
 
         if key_padding_mask is not None:
-            assert key_padding_mask.shape[0] == bsz
-            assert key_padding_mask.shape[1] == src_len
+            assert key_padding_mask.size(0) == bsz
+            assert key_padding_mask.size(1) == src_len
 
         if self.add_zero_attn:
             src_len += 1
-            k = P.Concat(1)([k, k.new_zeros((P.Shape()(k)[0], 1) + P.Shape()(k)[2:])])
-            v = P.Concat(1)([v, v.new_zeros((P.Shape()(v)[0], 1) + P.Shape()(v)[2:])])
+            k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
+            v = torch.cat([v, v.new_zeros((v.size(0), 1) + v.size()[2:])], dim=1)
             if attn_mask is not None:
-                attn_mask = P.Concat(1)([attn_mask, attn_mask.new_zeros(P.Shape()(attn_mask)[0], 1)])
+                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
             if key_padding_mask is not None:
-                key_padding_mask = P.Concat(1)([key_padding_mask, key_padding_mask.new_zeros(P.Shape()(key_padding_mask)[0], 1)])
+                key_padding_mask = torch.cat(
+                    [key_padding_mask, torch.zeros(key_padding_mask.size(0), 1).type_as(key_padding_mask)], dim=1)
 
-        attn_weights = ops.bmm(q, k.transpose(0, 2, 1))
-        assert list(P.Shape()(attn_weights)) == [bsz * self.num_heads, tgt_len, src_len]
-        # print(1)
+        attn_weights = torch.bmm(q, k.transpose(1, 2))
+        assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
+
         if attn_mask is not None:
             attn_mask = attn_mask.unsqueeze(0)
             if self.onnx_trace:
-                attn_mask = P.Tile()(attn_mask, (P.Shape()(attn_weights)[0], 1, 1,))
+                attn_mask = attn_mask.repeat(attn_weights.size(0), 1, 1)
             attn_weights += attn_mask
+
         if key_padding_mask is not None:
             # don't attend to padding symbols
             attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
             if self.onnx_trace:
-                attn_weights = ops.where(
+                attn_weights = torch.where(
                     key_padding_mask.unsqueeze(1).unsqueeze(2),
-                    Tensor([float("-Inf")]),
+                    torch.Tensor([float("-Inf")]),
                     attn_weights.float()
                 ).type_as(attn_weights)
             else:
@@ -198,58 +187,45 @@ class MultiheadAttention(nn.Cell):
                     float('-1e30'),
                 ).type_as(attn_weights)  # FP16 support: cast to float and back
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
-        # print(attn_weights[-1])
-        # attn_weights = utils.softmax(
-        #     attn_weights, dim=-1, onnx_trace=self.onnx_trace,
-        # ).type_as(attn_weights)
-        # print(attn_weights)
-        if self.onnx_trace:
-            attn_weights = ops.softmax(attn_weights.float(), axis=-1)
-        else:
-            attn_weights = ops.softmax(attn_weights, axis=-1, dtype=mindspore.float32)
-        # print(1, attn_weights[-1])
+
+        from fairseq import utils
+        attn_weights = utils.softmax(
+            attn_weights, dim=-1, onnx_trace=self.onnx_trace,
+        ).type_as(attn_weights)
+
         if gauss_weight is not None:
             # gauss_weight = gauss_weight.unsqueeze(1).repeat(self.num_heads, tgt_len, 1)
-            # gauss_weight = P.Reshape()(gauss_weight.unsqueeze(1).unsqueeze(1)\
-            #     .expand(-1, self.num_heads, tgt_len, -1), (*attn_weights.shape,))
-            gauss_weight = ops.broadcast_to(gauss_weight.unsqueeze(1).unsqueeze(1), (-1, self.num_heads, tgt_len, -1)).reshape(*attn_weights.shape)
+            gauss_weight = gauss_weight.unsqueeze(1).unsqueeze(1)\
+                .expand(-1, self.num_heads, tgt_len, -1).reshape(*attn_weights.shape)
             attn_weights = attn_weights * (gauss_weight + 1e-10)
-            attn_weights = attn_weights / attn_weights.sum(axis=-1, keepdims=True)
-        # print(2)
-        # attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
-        # print("dropout", self.dropout)
-        attn_weights = ops.dropout(attn_weights, p=self.dropout, training=self.training)
-        # print(3, attn_weights.shape, v.shape)
-        attn = ops.bmm(attn_weights, v)
-        # print(attn_weights)
-        # print(3.5)
-        assert list(P.Shape()(attn)) == [bsz * self.num_heads, tgt_len, self.head_dim]
-        if (self.onnx_trace and P.Shape()(attn)[1] == 1):
+            attn_weights = attn_weights / attn_weights.sum(dim=-1, keepdim=True)
+        
+        attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
+
+        attn = torch.bmm(attn_weights, v)
+        assert list(attn.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
+        if (self.onnx_trace and attn.size(1) == 1):
             # when ONNX tracing a single decoder step (sequence length == 1)
             # the transpose is a no-op copy before view, thus unnecessary
             attn = attn.contiguous().view(tgt_len, bsz, embed_dim)
         else:
-            # print(3.6)
-            attn = attn.transpose(1, 0, 2)
-            # attn = attn.contiguous()
-            # print(3.7, attn.shape)
-            attn = attn.reshape(tgt_len, bsz, embed_dim)
-        # print(4)
+            attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
         attn = self.out_proj(attn)
+
         if need_weights:
             # average attention weights over heads
             attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_weights = attn_weights.sum(axis=1) / self.num_heads
+            attn_weights = attn_weights.sum(dim=1) / self.num_heads
         else:
             attn_weights = None
-        # print(5)
+
         return attn, attn_weights
 
     def in_proj_qkv(self, query):
-        return self._in_proj(query).chunk(3, axis=-1)
+        return self._in_proj(query).chunk(3, dim=-1)
 
     def in_proj_kv(self, key):
-        return self._in_proj(key, start=self.embed_dim).chunk(2, axis=-1)
+        return self._in_proj(key, start=self.embed_dim).chunk(2, dim=-1)
 
     def in_proj_q(self, query):
         return self._in_proj(query, end=self.embed_dim)
@@ -266,9 +242,7 @@ class MultiheadAttention(nn.Cell):
         weight = weight[start:end, :]
         if bias is not None:
             bias = bias[start:end]
-        # return F.linear(input, weight, bias)
-        return ops.dense(input, weight, bias)
-
+        return F.linear(input, weight, bias)
 
     def reorder_incremental_state(self, incremental_state, new_order):
         """Reorder buffered internal state (for incremental generation)."""
@@ -281,11 +255,11 @@ class MultiheadAttention(nn.Cell):
 
 def fill_with_neg_inf(t):
     """FP16-compatible function that fills a tensor with -inf."""
-    t = t.float().fill(float(-1e30)).type_as(t)
-    return t
+    return t.float().fill_(float('-inf')).type_as(t)
 
 
-'''
+
+
 
 class CosformerAttention(nn.Module):
     """
@@ -504,5 +478,3 @@ class CosformerAttention(nn.Module):
             attn_output = self.out_proj(attn_output)
 
         return attn_output
-
-'''
