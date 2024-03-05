@@ -1,0 +1,65 @@
+{
+    "dataset": {
+      "dataset": "CharadesSTA",
+      "feature_path": "data/charades/i3d_debug_features.hdf5",
+      "vocab_size": 1111,
+      "word_dim": 300,
+      "frame_dim": 1024,
+      "max_num_words": 20,
+      "max_num_frames": 200,
+      "target_stride": 1,
+      "train_data": "data/charades/glance/glance_debug_charades.json",
+      "test_data": "data/charades/glance/glance_debug_charades.json",
+      "val_data": "data/charades/glance/glance_debug_charades.json",
+      "vocab_path": "data/charades/glove.pkl"
+    },
+    "train": {
+      "optimizer": {
+        "lr": 4e-4,
+        "weight_decay": 0,
+        "warmup_updates": 400,
+        "warmup_init_lr": 1e-7
+      },
+      "batch_size": 32,
+      "max_num_epochs": 30,
+      "train_txt_decoder_epoch": 0,
+      "model_saved_path": "checkpoints/charades/i3d"
+    },
+    "model": {
+      "name": "CFMR",
+      "config": {
+        "frames_input_size": 1024,
+        "words_input_size": 300,
+        "hidden_size": 256,
+        "use_negative": true,
+        "sigma": 9,
+        "gamma": 0.5,
+        "dropout": 0.1,
+        "Transformers": {
+          "d_model": 256,
+          "num_heads": 4,
+          "num_decoder_layers1": 3,
+          "num_decoder_layers2": 3,
+          "dropout": 0.1
+        },
+        "num_concept": 7,
+        "guass_width_num_training": 3,
+        "width_thresh_training": 0.55,
+        "guass_center_num": 8,
+        "guass_width_num": 3,
+        "width_thresh": 0.45
+  
+      }
+    },
+    "loss": {
+      "margin_1": 0.1,
+      "margin_2": 0.15,
+      "margin_3": 0.30,
+      "margin_4": 0.25,
+      "use_ref_words_rec": false,
+      "use_ref_words_sam": false,
+  
+      "alpha_1": 2.0,
+      "alpha_2": 1.0
+    }
+  }

@@ -1,0 +1,65 @@
+{
+  "dataset": {
+    "dataset": "TACoS",
+    "feature_path": "/mnt/disk1/jiangxun/TACoS/c3d/features/tall_c3d_features.hdf5",
+    "vocab_size": 2288,
+    "word_dim": 300,
+    "frame_dim": 4096,
+    "max_num_words": 20,
+    "max_num_frames": 512,
+    "target_stride": 1,
+    "train_data": "data/tacos/glance/glance_train_tacos.json",
+    "test_data": "data/tacos/glance/glance_test_tacos.json",
+    "val_data": "data/tacos/glance/glance_test_tacos.json",
+    "vocab_path": "data/tacos/glove.pkl"
+  },
+  "train": {
+    "optimizer": {
+      "lr": 4e-4,
+      "weight_decay": 0,
+      "warmup_updates": 400,
+      "warmup_init_lr": 1e-7
+    },
+    "batch_size": 32,
+    "max_num_epochs": 60,
+    "model_saved_path": "checkpoints/tacos/"
+  },
+
+  "model": {
+    "name": "CFMR",
+    "config": {
+      "frames_input_size": 4096,
+      "words_input_size": 300,
+      "hidden_size": 256,
+      "use_negative": true,
+      "sigma": 9,
+      "gamma": 0,
+      "dropout": 0.1,
+      "Transformers": {
+        "d_model": 256,
+        "num_heads": 4,
+        "num_decoder_layers1": 3,
+        "num_decoder_layers2": 3,
+        "dropout": 0.1
+      },
+      "num_concept": 8,
+      "guass_width_num_training": 3,
+      "width_thresh_training": 0.3,
+      "guass_center_num": 15,
+      "guass_width_num": 3,
+      "width_thresh": 0.3
+    }
+  },
+
+  "loss": {
+    "margin_1": 0.15,
+    "margin_2": 0.15,
+    "margin_3": 0.20,
+    "margin_4": 0.30,
+    "use_ref_words_rec": true,
+    "use_ref_words_sam": true,
+
+    "alpha_1": 1.0,
+    "alpha_2": 1.0
+  }
+}
