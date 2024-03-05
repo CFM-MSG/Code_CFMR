@@ -1,7 +1,7 @@
 
 # Introduction
 
-This is our **MindSpore** implementation codes of *"Faster Video Moment Retrieval with Cheaper Point-Level Supervision"* (CFMR).
+This is our **MindSpore** implementation codes of *"Faster Video Moment Retrieval with Point-Level Supervision"* (CFMR).
 
 ## Re-Glance Networks
 
@@ -26,7 +26,7 @@ This is our **MindSpore** implementation codes of *"Faster Video Moment Retrieva
 # Data Preparation  
 
 We employ pre-trained I3D model to extract the Charades-STA features, while C3D models to extract the ActivityNet-Caption and TACoS features.  
-Following the anonymity requirement, our feature files will be released through cloud storage after paper acceptance.  
+For now we provide the config file on the TACoS dataset.
 You can follow the previous counterpart methods which have been published to deploy the off-the-shelf features.  
 Please remember to pack them into hdf5 file and modify the feature path in our config files:  
 
@@ -52,8 +52,6 @@ If you want to evaluate a pre-trained model, please use the following command:
 python train_ms.py --config-path config/charades/i3d.json --tag CFMR --log ./log/charades/ --resume $checkpoint/charades/model-best.pt$ 
 ```
 
-For now we provide the config file on the TACoS dataset.
-The other two config files and pre-trained models will be released after paper acceptance.  
 
 # Comparisons on Accuracy and Efficiency of Video Moment Retrieval
 
